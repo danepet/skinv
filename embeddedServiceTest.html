@@ -1,93 +1,480 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Salesforce Messaging with Input Blocking</title>
-  <style>
-    /* Optional: Styling for disabled input overlay */
-    #inputBlockOverlay {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 100px;
-      background-color: rgba(255, 255, 255, 0.85);
-      z-index: 9999;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      color: #333;
-      pointer-events: none;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embedded Messaging - Input Blocked Until Agent Joins</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .status-panel {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-waiting {
+            background-color: #ffc107;
+        }
+        
+        .status-connected {
+            background-color: #28a745;
+        }
+        
+        .status-error {
+            background-color: #dc3545;
+        }
+        
+        .event-log {
+            margin-top: 30px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+        }
+        
+        .event-log h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        
+        .log-entry {
+            padding: 8px 12px;
+            margin: 4px 0;
+            background-color: white;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .log-entry.info {
+            border-left: 3px solid #17a2b8;
+        }
+        
+        .log-entry.success {
+            border-left: 3px solid #28a745;
+        }
+        
+        .log-entry.warning {
+            border-left: 3px solid #ffc107;
+        }
+        
+        .log-entry.error {
+            border-left: 3px solid #dc3545;
+        }
+        
+        .overlay-message {
+            position: fixed;
+            bottom: 100px;
+            right: 20px;
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 10000;
+            display: none;
+            max-width: 300px;
+        }
+        
+        .overlay-message.show {
+            display: block;
+        }
+        
+        .debug-controls {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 6px;
+        }
+        
+        button {
+            padding: 8px 16px;
+            margin-right: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
 </head>
 <body>
-  <h1>Salesforce Embedded Messaging</h1>
-  <div>Waiting for bot/agent to join...</div>
+    <div class="container">
+        <h1>Embedded Messaging Test - Input Blocking</h1>
+        
+        <div class="status-panel">
+            <h2>Connection Status</h2>
+            <p id="connectionStatus">
+                <span class="status-indicator status-waiting"></span>
+                <span id="statusText">Waiting for messaging to initialize...</span>
+            </p>
+            <p id="agentStatus">
+                <span class="status-indicator status-waiting"></span>
+                <span id="agentStatusText">No agent or bot connected</span>
+            </p>
+            <p id="inputStatus">
+                <span class="status-indicator status-error"></span>
+                <span id="inputStatusText">User input is BLOCKED</span>
+            </p>
+        </div>
+        
+        <div class="debug-controls">
+            <h3>Debug Controls</h3>
+            <button onclick="clearEventLog()">Clear Event Log</button>
+            <button onclick="checkMessagingState()">Check Messaging State</button>
+        </div>
+        
+        <div class="event-log">
+            <h3>Event Log</h3>
+            <div id="eventLogContent"></div>
+        </div>
+    </div>
+    
+    <div id="overlayMessage" class="overlay-message">
+        <strong>⚠️ Input Blocked</strong><br>
+        Please wait for an agent or bot to join the conversation before sending messages.
+    </div>
 
-  <!-- Overlay shown while input is blocked -->
-  <div id="inputBlockOverlay">Connecting you to a representative...</div>
-
-  <!-- Salesforce bootstrap loader (customize below!) -->
-  <script>
-    function initEmbeddedMessaging() {
-      try {
-        embeddedservice_bootstrap.settings.language = 'en_US';
-
-        embeddedservice_bootstrap.init(
-          '00DAu000006oc0D', // Org ID
-          'Sophia_AI', // Embedded Service Deployment Name
-          'https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaAI1736249954377',
-          {
-            scrt2URL: 'https://skinvitality--sanbox23.sandbox.my.salesforce-scrt.com'
-          }
-        );
-      } catch (err) {
-        console.error('Error loading Embedded Messaging:', err);
-      }
-    }
-  </script>
-
-  <script src="https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaAI1736249954377/assets/js/bootstrap.min.js" onload="initEmbeddedMessaging()" async defer></script>
-
-  <script>
-    // Show or hide input blocker
-    function toggleInputBlock(show) {
-      const overlay = document.getElementById("inputBlockOverlay");
-      if (overlay) overlay.style.display = show ? "flex" : "none";
-    }
-
-    // Disable actual input field (fallback in case it's accessible)
-    function disableInputField(disable) {
-      const interval = setInterval(() => {
-        const input = document.querySelector("textarea");
-        if (input) {
-          input.disabled = disable;
-          input.style.backgroundColor = disable ? "#eee" : "";
-          input.style.cursor = disable ? "not-allowed" : "";
-          input.placeholder = disable ? "Please wait for a representative..." : "Type your message...";
-          clearInterval(interval);
+    <!-- Embedded Messaging Script -->
+    <script type='text/javascript'>
+        // Global variables
+        let conversationStarted = false;
+        let agentJoined = false;
+        let inputBlocked = true;
+        let blockingInterval = null;
+        let overlayCheckInterval = null;
+        
+        // Logging function
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            
+            const logContent = document.getElementById('eventLogContent');
+            logContent.appendChild(logEntry);
+            logContent.scrollTop = logContent.scrollHeight;
+            
+            console.log(`[Messaging] ${message}`);
         }
-      }, 200);
-    }
-
-    // Block input on chat init
-    window.addEventListener("onEmbeddedMessagingReady", function () {
-      toggleInputBlock(true);
-      disableInputField(true);
-    });
-
-    // Listen for bot or agent join
-    window.addEventListener("onEmbeddedMessagingConversationParticipantChanged", function (event) {
-      const participants = event?.detail?.participants || [];
-      const someoneJoined = participants.some(p => p.participantType === "Internal");
-      if (someoneJoined) {
-        console.log("Bot or agent has joined the conversation.");
-        toggleInputBlock(false);
-        disableInputField(false);
-      }
-    });
-  </script>
+        
+        // Update status displays
+        function updateStatus() {
+            const connectionStatus = document.getElementById('statusText');
+            const agentStatusEl = document.getElementById('agentStatusText');
+            const inputStatusEl = document.getElementById('inputStatusText');
+            
+            const connectionIndicator = connectionStatus.previousElementSibling;
+            const agentIndicator = agentStatusEl.previousElementSibling;
+            const inputIndicator = inputStatusEl.previousElementSibling;
+            
+            if (conversationStarted) {
+                connectionStatus.textContent = 'Conversation active';
+                connectionIndicator.className = 'status-indicator status-connected';
+            }
+            
+            if (agentJoined) {
+                agentStatusEl.textContent = 'Agent/Bot connected';
+                agentIndicator.className = 'status-indicator status-connected';
+                
+                inputStatusEl.textContent = 'User input is ENABLED';
+                inputIndicator.className = 'status-indicator status-connected';
+            } else {
+                agentStatusEl.textContent = 'Waiting for agent/bot to join...';
+                agentIndicator.className = 'status-indicator status-waiting';
+                
+                inputStatusEl.textContent = 'User input is BLOCKED';
+                inputIndicator.className = 'status-indicator status-error';
+            }
+        }
+        
+        // Block input functionality
+        function blockUserInput() {
+            if (!inputBlocked || agentJoined) return;
+            
+            try {
+                // Try multiple selectors for the input field
+                const inputSelectors = [
+                    'textarea[data-key="input"]',
+                    'textarea.slds-textarea',
+                    'textarea[placeholder*="Type"]',
+                    'textarea[placeholder*="Message"]',
+                    '.embeddedMessaging textarea',
+                    '[class*="messageInput"] textarea',
+                    '[class*="message-input"] textarea',
+                    'textarea'
+                ];
+                
+                let inputFound = false;
+                
+                for (const selector of inputSelectors) {
+                    const inputs = document.querySelectorAll(selector);
+                    inputs.forEach(input => {
+                        if (input && !input.closest('.event-log')) {
+                            input.disabled = true;
+                            input.placeholder = 'Waiting for agent to join...';
+                            input.style.cursor = 'not-allowed';
+                            input.style.backgroundColor = '#f0f0f0';
+                            inputFound = true;
+                        }
+                    });
+                }
+                
+                // Also try to find and disable send buttons
+                const buttonSelectors = [
+                    'button[title="Send"]',
+                    'button[aria-label="Send"]',
+                    '.slds-button[title="Send"]',
+                    '[class*="sendButton"]',
+                    '[class*="send-button"]'
+                ];
+                
+                buttonSelectors.forEach(selector => {
+                    const buttons = document.querySelectorAll(selector);
+                    buttons.forEach(button => {
+                        if (button && !button.closest('.debug-controls')) {
+                            button.disabled = true;
+                            button.style.cursor = 'not-allowed';
+                        }
+                    });
+                });
+                
+                // Show overlay message if input is found and conversation started
+                if (inputFound && conversationStarted && !agentJoined) {
+                    document.getElementById('overlayMessage').classList.add('show');
+                }
+                
+            } catch (error) {
+                log(`Error blocking input: ${error.message}`, 'error');
+            }
+        }
+        
+        // Enable input functionality
+        function enableUserInput() {
+            log('Enabling user input', 'success');
+            inputBlocked = false;
+            
+            try {
+                // Re-enable all inputs
+                const inputs = document.querySelectorAll('textarea:disabled');
+                inputs.forEach(input => {
+                    input.disabled = false;
+                    input.placeholder = 'Type a message...';
+                    input.style.cursor = 'text';
+                    input.style.backgroundColor = '';
+                });
+                
+                // Re-enable send buttons
+                const buttons = document.querySelectorAll('button:disabled');
+                buttons.forEach(button => {
+                    if (button.textContent.includes('Send') || button.title === 'Send') {
+                        button.disabled = false;
+                        button.style.cursor = 'pointer';
+                    }
+                });
+                
+                // Hide overlay message
+                document.getElementById('overlayMessage').classList.remove('show');
+                
+                // Clear the blocking interval
+                if (blockingInterval) {
+                    clearInterval(blockingInterval);
+                    blockingInterval = null;
+                }
+                
+            } catch (error) {
+                log(`Error enabling input: ${error.message}`, 'error');
+            }
+        }
+        
+        // Initialize Embedded Messaging
+        function initEmbeddedMessaging() {
+            try {
+                log('Initializing Embedded Messaging...', 'info');
+                
+                embeddedservice_bootstrap.settings.language = 'en_US';
+                embeddedservice_bootstrap.init(
+                    '00DAu000006oc0D',
+                    'Sophia_AI',
+                    'https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaAI1736249954377',
+                    {
+                        scrt2URL: 'https://skinvitality--sanbox23.sandbox.my.salesforce-scrt.com'
+                    }
+                );
+                
+                // Start checking for input fields periodically
+                blockingInterval = setInterval(blockUserInput, 100);
+                
+            } catch (err) {
+                log(`Error loading Embedded Messaging: ${err.message}`, 'error');
+                console.error('Error loading Embedded Messaging: ', err);
+            }
+        }
+        
+        // Event Listeners
+        window.addEventListener("onEmbeddedMessagingReady", (event) => {
+            log('Messaging API is ready', 'success');
+            updateStatus();
+        });
+        
+        window.addEventListener("onEmbeddedMessagingConversationStarted", (event) => {
+            log(`Conversation started: ${JSON.stringify(event.detail)}`, 'success');
+            conversationStarted = true;
+            updateStatus();
+            
+            // Ensure input blocking is active
+            if (!blockingInterval) {
+                blockingInterval = setInterval(blockUserInput, 100);
+            }
+        });
+        
+        window.addEventListener("onEmbeddedMessagingConversationParticipantChanged", (event) => {
+            log(`Participant changed: ${JSON.stringify(event.detail)}`, 'warning');
+            
+            // Check if an agent or bot joined
+            if (event.detail && event.detail.participants) {
+                const hasInternalUser = event.detail.participants.some(p => 
+                    p.type === 'Agent' || p.type === 'Bot' || p.role === 'Agent' || p.role === 'Bot'
+                );
+                
+                if (hasInternalUser && !agentJoined) {
+                    agentJoined = true;
+                    log('Agent/Bot has joined the conversation!', 'success');
+                    enableUserInput();
+                    updateStatus();
+                }
+            }
+        });
+        
+        window.addEventListener("onEmbeddedMessagingConversationRouted", (event) => {
+            log(`Conversation routed: ${JSON.stringify(event.detail)}`, 'warning');
+            
+            // This might indicate an agent is about to join
+            if (event.detail && event.detail.success && !agentJoined) {
+                log('Conversation successfully routed, agent should join soon', 'info');
+            }
+        });
+        
+        window.addEventListener("onEmbeddedMessagingButtonClicked", (event) => {
+            log('Chat button clicked', 'info');
+        });
+        
+        window.addEventListener("onEmbeddedMessagingWindowMaximized", (event) => {
+            log('Chat window maximized', 'info');
+            
+            // Recheck input blocking when window is maximized
+            if (!agentJoined) {
+                blockUserInput();
+            }
+        });
+        
+        window.addEventListener("onEmbeddedMessageSent", (event) => {
+            log(`Message sent: ${JSON.stringify(event.detail)}`, 'info');
+            
+            // Check if message is from agent/bot
+            if (event.detail && event.detail.sender && 
+                (event.detail.sender.type === 'Agent' || event.detail.sender.type === 'Bot')) {
+                
+                if (!agentJoined) {
+                    agentJoined = true;
+                    log('Agent/Bot message detected - enabling input', 'success');
+                    enableUserInput();
+                    updateStatus();
+                }
+            }
+        });
+        
+        window.addEventListener("onEmbeddedMessagingConversationClosed", (event) => {
+            log('Conversation closed', 'warning');
+            conversationStarted = false;
+            agentJoined = false;
+            inputBlocked = true;
+            updateStatus();
+            
+            // Restart blocking interval
+            if (!blockingInterval) {
+                blockingInterval = setInterval(blockUserInput, 100);
+            }
+        });
+        
+        // Debug functions
+        function clearEventLog() {
+            document.getElementById('eventLogContent').innerHTML = '';
+            log('Event log cleared', 'info');
+        }
+        
+        function checkMessagingState() {
+            log(`Current state - Conversation: ${conversationStarted}, Agent: ${agentJoined}, Input blocked: ${inputBlocked}`, 'info');
+            
+            // Force a check for input fields
+            blockUserInput();
+        }
+        
+        // Listen for all messaging events for debugging
+        const allEvents = [
+            'onEmbeddedMessagingBusinessHoursEnded',
+            'onEmbeddedMessagingBusinessHoursStarted',
+            'onEmbeddedMessagingButtonCreated',
+            'onEmbeddedMessagingIdentityTokenExpired',
+            'onEmbeddedMessagingPreChatLoaded',
+            'onEmbeddedMessagingPreChatSubmitted',
+            'onEmbeddedMessageLinkClicked',
+            'onEmbeddedMessageRead',
+            'onEmbeddedMessageDelivered',
+            'onEmbeddedMessagingTranscriptDownloadSuccessful',
+            'onEmbeddedMessagingTranscriptRequested',
+            'onEmbeddedMessagingTranscriptRequestFailed',
+            'onEmbeddedMessagingWindowClosed',
+            'onEmbeddedMessagingWindowMinimized'
+        ];
+        
+        allEvents.forEach(eventName => {
+            window.addEventListener(eventName, (event) => {
+                log(`Event: ${eventName}`, 'info');
+            });
+        });
+        
+    </script>
+    
+    <script type='text/javascript' 
+            src='https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaAI1736249954377/assets/js/bootstrap.min.js' 
+            onload='initEmbeddedMessaging()'>
+    </script>
 </body>
 </html>
