@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Embedded Messaging - Input Blocked Until Agent Joins</title>
+    <title>Embedded Messaging - Input Blocked Until Agent Joins (Parent Page)</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -94,22 +94,24 @@
             border-left: 3px solid #dc3545;
         }
         
-        .overlay-message {
-            position: fixed;
-            bottom: 100px;
-            right: 20px;
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            padding: 15px 20px;
+        .iframe-code {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #f8f9fa;
             border-radius: 6px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            z-index: 10000;
-            display: none;
-            max-width: 300px;
         }
         
-        .overlay-message.show {
-            display: block;
+        .iframe-code h3 {
+            margin-top: 0;
+        }
+        
+        .iframe-code pre {
+            background-color: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 14px;
         }
         
         .debug-controls {
@@ -136,7 +138,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>Embedded Messaging Test - Input Blocking</h1>
+        <h1>Embedded Messaging Test - Input Blocking via PostMessage</h1>
         
         <div class="status-panel">
             <h2>Connection Status</h2>
@@ -144,41 +146,41 @@
                 <span class="status-indicator status-waiting"></span>
                 <span id="statusText">Waiting for messaging to initialize...</span>
             </p>
-            <p id="agentStatus">
+            <p id="conversationStatus">
                 <span class="status-indicator status-waiting"></span>
-                <span id="agentStatusText">No agent or bot connected</span>
+                <span id="conversationStatusText">No conversation started</span>
             </p>
             <p id="inputStatus">
                 <span class="status-indicator status-error"></span>
-                <span id="inputStatusText">User input is BLOCKED</span>
+                <span id="inputStatusText">User input should be BLOCKED</span>
             </p>
         </div>
         
         <div class="debug-controls">
             <h3>Debug Controls</h3>
             <button onclick="clearEventLog()">Clear Event Log</button>
-            <button onclick="checkMessagingState()">Check Messaging State</button>
+            <button onclick="sendBlockMessage()">Manually Send Block Message</button>
+            <button onclick="sendEnableMessage()">Manually Send Enable Message</button>
         </div>
         
         <div class="event-log">
             <h3>Event Log</h3>
             <div id="eventLogContent"></div>
         </div>
-    </div>
-    
-    <div id="overlayMessage" class="overlay-message">
-        <strong>⚠️ Input Blocked</strong><br>
-        Please wait for an agent or bot to join the conversation before sending messages.
+        
+        <div class="iframe-code">
+            <h3>Code for Embedded Service Site (iframe)</h3>
+            <p>Add this code to the HEAD section of your embedded service site:</p>
+            <pre id="iframeCode"></pre>
+        </div>
     </div>
 
     <!-- Embedded Messaging Script -->
     <script type='text/javascript'>
         // Global variables
         let conversationStarted = false;
-        let agentJoined = false;
-        let inputBlocked = true;
-        let blockingInterval = null;
-        let overlayCheckInterval = null;
+        let messagesSent = 0;
+        let inputEnabled = false;
         
         // Logging function
         function log(message, type = 'info') {
@@ -191,117 +193,74 @@
             logContent.appendChild(logEntry);
             logContent.scrollTop = logContent.scrollHeight;
             
-            console.log(`[Messaging] ${message}`);
+            console.log(`[Parent] ${message}`);
         }
         
         // Update status displays
         function updateStatus() {
-            const connectionStatus = document.getElementById('statusText');
-            const agentStatusEl = document.getElementById('agentStatusText');
+            const conversationStatusEl = document.getElementById('conversationStatusText');
             const inputStatusEl = document.getElementById('inputStatusText');
             
-            const connectionIndicator = connectionStatus.previousElementSibling;
-            const agentIndicator = agentStatusEl.previousElementSibling;
+            const conversationIndicator = conversationStatusEl.previousElementSibling;
             const inputIndicator = inputStatusEl.previousElementSibling;
             
             if (conversationStarted) {
-                connectionStatus.textContent = 'Conversation active';
-                connectionIndicator.className = 'status-indicator status-connected';
+                conversationStatusEl.textContent = 'Conversation active';
+                conversationIndicator.className = 'status-indicator status-connected';
+            } else {
+                conversationStatusEl.textContent = 'No conversation started';
+                conversationIndicator.className = 'status-indicator status-waiting';
             }
             
-            if (agentJoined) {
-                agentStatusEl.textContent = 'Agent/Bot connected';
-                agentIndicator.className = 'status-indicator status-connected';
-                
-                inputStatusEl.textContent = 'User input is ENABLED';
+            if (inputEnabled) {
+                inputStatusEl.textContent = 'User input should be ENABLED';
                 inputIndicator.className = 'status-indicator status-connected';
             } else {
-                agentStatusEl.textContent = 'Waiting for agent/bot to join...';
-                agentIndicator.className = 'status-indicator status-waiting';
-                
-                inputStatusEl.textContent = 'User input is BLOCKED';
+                inputStatusEl.textContent = 'User input should be BLOCKED';
                 inputIndicator.className = 'status-indicator status-error';
             }
         }
         
-        // Block input functionality
-        function blockUserInput() {
+        // Send message to iframe
+        function sendMessageToIframe(action, data = {}) {
             try {
-                // Target the specific class
-                const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
+                // Find all iframes that might be the embedded service
+                const iframes = document.querySelectorAll('iframe');
+                let messageSent = false;
                 
-                if (input) {
-                    input.disabled = true;
-                    input.placeholder = 'Waiting for agent to join...';
-                    input.style.cursor = 'not-allowed';
-                    input.style.backgroundColor = '#f0f0f0';
-                    
-                    log('Input field blocked successfully', 'info');
-                    
-                    // Also disable send button
-                    const sendButton = document.querySelector('button[title="Send"], button[aria-label="Send"]');
-                    if (sendButton) {
-                        sendButton.disabled = true;
-                        sendButton.style.cursor = 'not-allowed';
+                iframes.forEach(iframe => {
+                    // Check if this might be the embedded service iframe
+                    if (iframe.src && iframe.src.includes('ESWSophiaAI')) {
+                        iframe.contentWindow.postMessage({
+                            type: 'EMBEDDED_MESSAGING_INPUT_CONTROL',
+                            action: action,
+                            ...data
+                        }, '*'); // In production, use specific origin instead of '*'
+                        messageSent = true;
+                        log(`Sent ${action} message to iframe: ${iframe.src}`, 'success');
                     }
-                    
-                    // Show overlay message
-                    document.getElementById('overlayMessage').classList.add('show');
-                    
-                    // Stop checking once we've found and disabled the input
-                    if (blockingInterval) {
-                        clearInterval(blockingInterval);
-                        blockingInterval = null;
-                    }
-                    
-                    return true;
+                });
+                
+                if (!messageSent) {
+                    log('No embedded service iframe found yet', 'warning');
                 }
                 
-                return false;
-                
             } catch (error) {
-                log(`Error blocking input: ${error.message}`, 'error');
-                return false;
+                log(`Error sending message to iframe: ${error.message}`, 'error');
             }
         }
         
-        // Enable input functionality
-        function enableUserInput() {
-            log('Enabling user input', 'success');
-            inputBlocked = false;
-            agentJoined = true;
-            
-            try {
-                // Re-enable the specific input
-                const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
-                if (input) {
-                    input.disabled = false;
-                    input.placeholder = 'Type a message...';
-                    input.style.cursor = 'text';
-                    input.style.backgroundColor = '';
-                }
-                
-                // Re-enable send button
-                const sendButton = document.querySelector('button[title="Send"], button[aria-label="Send"]');
-                if (sendButton) {
-                    sendButton.disabled = false;
-                    sendButton.style.cursor = 'pointer';
-                }
-                
-                // Hide overlay message
-                document.getElementById('overlayMessage').classList.remove('show');
-                
-                // Clear the blocking interval if it's still running
-                if (blockingInterval) {
-                    clearInterval(blockingInterval);
-                    blockingInterval = null;
-                }
-                
-                updateStatus();
-                
-            } catch (error) {
-                log(`Error enabling input: ${error.message}`, 'error');
-            }
+        // Manual control functions
+        function sendBlockMessage() {
+            sendMessageToIframe('BLOCK_INPUT');
+            inputEnabled = false;
+            updateStatus();
+        }
+        
+        function sendEnableMessage() {
+            sendMessageToIframe('ENABLE_INPUT');
+            inputEnabled = true;
+            updateStatus();
         }
         
         // Initialize Embedded Messaging
@@ -319,9 +278,6 @@
                     }
                 );
                 
-                // Start checking for input fields periodically
-                blockingInterval = setInterval(blockUserInput, 100);
-                
             } catch (err) {
                 log(`Error loading Embedded Messaging: ${err.message}`, 'error');
                 console.error('Error loading Embedded Messaging: ', err);
@@ -331,89 +287,49 @@
         // Event Listeners
         window.addEventListener("onEmbeddedMessagingReady", (event) => {
             log('Messaging API is ready', 'success');
-            updateStatus();
+            document.getElementById('statusText').textContent = 'Messaging ready';
+            document.getElementById('statusText').previousElementSibling.className = 'status-indicator status-connected';
         });
         
         window.addEventListener("onEmbeddedMessagingConversationStarted", (event) => {
             log(`Conversation started: ${JSON.stringify(event.detail)}`, 'success');
             conversationStarted = true;
+            messagesSent = 0;
+            inputEnabled = false;
             updateStatus();
             
-            // Start checking for the input field to block it
-            log('Starting input blocking interval...', 'info');
-            if (blockingInterval) {
-                clearInterval(blockingInterval);
-            }
-            blockingInterval = setInterval(() => {
-                const blocked = blockUserInput();
-                if (blocked) {
-                    log('Input successfully blocked, stopping interval', 'success');
-                    clearInterval(blockingInterval);
-                    blockingInterval = null;
-                }
-            }, 100);
-        });
-        
-        window.addEventListener("onEmbeddedMessagingConversationParticipantChanged", (event) => {
-            log(`Participant changed: ${JSON.stringify(event.detail)}`, 'warning');
-            
-            // Check if an agent or bot joined
-            if (event.detail && event.detail.participants) {
-                const hasInternalUser = event.detail.participants.some(p => 
-                    p.type === 'Agent' || p.type === 'Bot' || p.role === 'Agent' || p.role === 'Bot'
-                );
-                
-                if (hasInternalUser && !agentJoined) {
-                    agentJoined = true;
-                    log('Agent/Bot has joined the conversation!', 'success');
-                    enableUserInput();
-                    updateStatus();
-                }
-            }
-        });
-        
-        window.addEventListener("onEmbeddedMessagingConversationRouted", (event) => {
-            log(`Conversation routed: ${JSON.stringify(event.detail)}`, 'warning');
-            
-            // This might indicate an agent is about to join
-            if (event.detail && event.detail.success && !agentJoined) {
-                log('Conversation successfully routed, agent should join soon', 'info');
-            }
-        });
-        
-        window.addEventListener("onEmbeddedMessagingButtonClicked", (event) => {
-            log('Chat button clicked', 'info');
-        });
-        
-        window.addEventListener("onEmbeddedMessagingWindowMaximized", (event) => {
-            log('Chat window maximized', 'info');
-            
-            // Recheck input blocking when window is maximized
-            if (!agentJoined) {
-                blockUserInput();
-            }
+            // Send block message to iframe
+            log('Sending BLOCK_INPUT message to iframe', 'warning');
+            setTimeout(() => {
+                sendMessageToIframe('BLOCK_INPUT');
+            }, 500); // Small delay to ensure iframe is ready
         });
         
         window.addEventListener("onEmbeddedMessageSent", (event) => {
-            log(`Message sent: ${JSON.stringify(event.detail)}`, 'info');
+            messagesSent++;
+            log(`Message sent (#${messagesSent}): ${JSON.stringify(event.detail)}`, 'info');
             
-            // Enable input on first message (regardless of sender)
-            if (!agentJoined) {
+            // Enable input after first message
+            if (messagesSent === 1 && !inputEnabled) {
                 log('First message detected - enabling input', 'success');
-                enableUserInput();
+                inputEnabled = true;
+                updateStatus();
+                sendMessageToIframe('ENABLE_INPUT');
             }
         });
         
         window.addEventListener("onEmbeddedMessagingConversationClosed", (event) => {
             log('Conversation closed', 'warning');
             conversationStarted = false;
-            agentJoined = false;
-            inputBlocked = true;
+            messagesSent = 0;
+            inputEnabled = false;
             updateStatus();
-            
-            // Restart blocking interval
-            if (!blockingInterval) {
-                blockingInterval = setInterval(blockUserInput, 100);
+        });
+        
+        // Listen for messages from iframe (optional - for debugging)
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'EMBEDDED_MESSAGING_INPUT_STATUS') {
+                log(`Received status from iframe: ${event.data.status}`, 'info');
             }
         });
         
@@ -423,36 +339,69 @@
             log('Event log cleared', 'info');
         }
         
-        function checkMessagingState() {
-            log(`Current state - Conversation: ${conversationStarted}, Agent: ${agentJoined}, Input blocked: ${inputBlocked}`, 'info');
+        // Display the iframe code
+        const iframeCode = `<script>
+(function() {
+    // Listen for messages from parent window
+    window.addEventListener('message', function(event) {
+        // In production, verify event.origin
+        if (event.data && event.data.type === 'EMBEDDED_MESSAGING_INPUT_CONTROL') {
+            console.log('[Iframe] Received message:', event.data);
             
-            // Force a check for input fields
-            blockUserInput();
+            const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
+            const sendButton = document.querySelector('button[title="Send"], button[aria-label="Send"]');
+            
+            if (event.data.action === 'BLOCK_INPUT') {
+                if (input) {
+                    input.disabled = true;
+                    input.placeholder = 'Waiting for agent to join...';
+                    input.style.cursor = 'not-allowed';
+                    input.style.backgroundColor = '#f0f0f0';
+                }
+                if (sendButton) {
+                    sendButton.disabled = true;
+                    sendButton.style.cursor = 'not-allowed';
+                }
+                
+                // Send confirmation back to parent
+                parent.postMessage({
+                    type: 'EMBEDDED_MESSAGING_INPUT_STATUS',
+                    status: 'blocked'
+                }, '*');
+                
+            } else if (event.data.action === 'ENABLE_INPUT') {
+                if (input) {
+                    input.disabled = false;
+                    input.placeholder = 'Type a message...';
+                    input.style.cursor = 'text';
+                    input.style.backgroundColor = '';
+                }
+                if (sendButton) {
+                    sendButton.disabled = false;
+                    sendButton.style.cursor = 'pointer';
+                }
+                
+                // Send confirmation back to parent
+                parent.postMessage({
+                    type: 'EMBEDDED_MESSAGING_INPUT_STATUS',
+                    status: 'enabled'
+                }, '*');
+            }
         }
+    });
+    
+    // Check for input field periodically when page loads
+    let checkInterval = setInterval(function() {
+        const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
+        if (input) {
+            console.log('[Iframe] Input field found, ready to receive commands');
+            clearInterval(checkInterval);
+        }
+    }, 100);
+})();
+<\/script>`;
         
-        // Listen for all messaging events for debugging
-        const allEvents = [
-            'onEmbeddedMessagingBusinessHoursEnded',
-            'onEmbeddedMessagingBusinessHoursStarted',
-            'onEmbeddedMessagingButtonCreated',
-            'onEmbeddedMessagingIdentityTokenExpired',
-            'onEmbeddedMessagingPreChatLoaded',
-            'onEmbeddedMessagingPreChatSubmitted',
-            'onEmbeddedMessageLinkClicked',
-            'onEmbeddedMessageRead',
-            'onEmbeddedMessageDelivered',
-            'onEmbeddedMessagingTranscriptDownloadSuccessful',
-            'onEmbeddedMessagingTranscriptRequested',
-            'onEmbeddedMessagingTranscriptRequestFailed',
-            'onEmbeddedMessagingWindowClosed',
-            'onEmbeddedMessagingWindowMinimized'
-        ];
-        
-        allEvents.forEach(eventName => {
-            window.addEventListener(eventName, (event) => {
-                log(`Event: ${eventName}`, 'info');
-            });
-        });
+        document.getElementById('iframeCode').textContent = iframeCode;
         
     </script>
     
