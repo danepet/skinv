@@ -226,62 +226,42 @@
         
         // Block input functionality
         function blockUserInput() {
-            if (!inputBlocked || agentJoined) return;
-            
             try {
-                // Try multiple selectors for the input field
-                const inputSelectors = [
-                    'textarea[data-key="input"]',
-                    'textarea.slds-textarea',
-                    'textarea[placeholder*="Type"]',
-                    'textarea[placeholder*="Message"]',
-                    '.embeddedMessaging textarea',
-                    '[class*="messageInput"] textarea',
-                    '[class*="message-input"] textarea',
-                    'textarea'
-                ];
+                // Target the specific class
+                const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
                 
-                let inputFound = false;
-                
-                for (const selector of inputSelectors) {
-                    const inputs = document.querySelectorAll(selector);
-                    inputs.forEach(input => {
-                        if (input && !input.closest('.event-log')) {
-                            input.disabled = true;
-                            input.placeholder = 'Waiting for agent to join...';
-                            input.style.cursor = 'not-allowed';
-                            input.style.backgroundColor = '#f0f0f0';
-                            inputFound = true;
-                        }
-                    });
-                }
-                
-                // Also try to find and disable send buttons
-                const buttonSelectors = [
-                    'button[title="Send"]',
-                    'button[aria-label="Send"]',
-                    '.slds-button[title="Send"]',
-                    '[class*="sendButton"]',
-                    '[class*="send-button"]'
-                ];
-                
-                buttonSelectors.forEach(selector => {
-                    const buttons = document.querySelectorAll(selector);
-                    buttons.forEach(button => {
-                        if (button && !button.closest('.debug-controls')) {
-                            button.disabled = true;
-                            button.style.cursor = 'not-allowed';
-                        }
-                    });
-                });
-                
-                // Show overlay message if input is found and conversation started
-                if (inputFound && conversationStarted && !agentJoined) {
+                if (input) {
+                    input.disabled = true;
+                    input.placeholder = 'Waiting for agent to join...';
+                    input.style.cursor = 'not-allowed';
+                    input.style.backgroundColor = '#f0f0f0';
+                    
+                    log('Input field blocked successfully', 'info');
+                    
+                    // Also disable send button
+                    const sendButton = document.querySelector('button[title="Send"], button[aria-label="Send"]');
+                    if (sendButton) {
+                        sendButton.disabled = true;
+                        sendButton.style.cursor = 'not-allowed';
+                    }
+                    
+                    // Show overlay message
                     document.getElementById('overlayMessage').classList.add('show');
+                    
+                    // Stop checking once we've found and disabled the input
+                    if (blockingInterval) {
+                        clearInterval(blockingInterval);
+                        blockingInterval = null;
+                    }
+                    
+                    return true;
                 }
+                
+                return false;
                 
             } catch (error) {
                 log(`Error blocking input: ${error.message}`, 'error');
+                return false;
             }
         }
         
@@ -289,34 +269,35 @@
         function enableUserInput() {
             log('Enabling user input', 'success');
             inputBlocked = false;
+            agentJoined = true;
             
             try {
-                // Re-enable all inputs
-                const inputs = document.querySelectorAll('textarea:disabled');
-                inputs.forEach(input => {
+                // Re-enable the specific input
+                const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
+                if (input) {
                     input.disabled = false;
                     input.placeholder = 'Type a message...';
                     input.style.cursor = 'text';
                     input.style.backgroundColor = '';
-                });
+                }
                 
-                // Re-enable send buttons
-                const buttons = document.querySelectorAll('button:disabled');
-                buttons.forEach(button => {
-                    if (button.textContent.includes('Send') || button.title === 'Send') {
-                        button.disabled = false;
-                        button.style.cursor = 'pointer';
-                    }
-                });
+                // Re-enable send button
+                const sendButton = document.querySelector('button[title="Send"], button[aria-label="Send"]');
+                if (sendButton) {
+                    sendButton.disabled = false;
+                    sendButton.style.cursor = 'pointer';
+                }
                 
                 // Hide overlay message
                 document.getElementById('overlayMessage').classList.remove('show');
                 
-                // Clear the blocking interval
+                // Clear the blocking interval if it's still running
                 if (blockingInterval) {
                     clearInterval(blockingInterval);
                     blockingInterval = null;
                 }
+                
+                updateStatus();
                 
             } catch (error) {
                 log(`Error enabling input: ${error.message}`, 'error');
@@ -358,10 +339,19 @@
             conversationStarted = true;
             updateStatus();
             
-            // Ensure input blocking is active
-            if (!blockingInterval) {
-                blockingInterval = setInterval(blockUserInput, 100);
+            // Start checking for the input field to block it
+            log('Starting input blocking interval...', 'info');
+            if (blockingInterval) {
+                clearInterval(blockingInterval);
             }
+            blockingInterval = setInterval(() => {
+                const blocked = blockUserInput();
+                if (blocked) {
+                    log('Input successfully blocked, stopping interval', 'success');
+                    clearInterval(blockingInterval);
+                    blockingInterval = null;
+                }
+            }, 100);
         });
         
         window.addEventListener("onEmbeddedMessagingConversationParticipantChanged", (event) => {
@@ -407,16 +397,10 @@
         window.addEventListener("onEmbeddedMessageSent", (event) => {
             log(`Message sent: ${JSON.stringify(event.detail)}`, 'info');
             
-            // Check if message is from agent/bot
-            if (event.detail && event.detail.sender && 
-                (event.detail.sender.type === 'Agent' || event.detail.sender.type === 'Bot')) {
-                
-                if (!agentJoined) {
-                    agentJoined = true;
-                    log('Agent/Bot message detected - enabling input', 'success');
-                    enableUserInput();
-                    updateStatus();
-                }
+            // Enable input on first message (regardless of sender)
+            if (!agentJoined) {
+                log('First message detected - enabling input', 'success');
+                enableUserInput();
             }
         });
         
