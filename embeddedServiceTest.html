@@ -1,23 +1,46 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Salesforce Embedded Messaging Test</title>
+  <meta charset="UTF-8">
+  <title>Salesforce Messaging with Input Blocking</title>
+  <style>
+    /* Optional: Styling for disabled input overlay */
+    #inputBlockOverlay {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 100px;
+      background-color: rgba(255, 255, 255, 0.85);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      color: #333;
+      pointer-events: none;
+    }
+  </style>
 </head>
 <body>
-  <div>Testing Embedded Messaging</div>
+  <h1>Salesforce Embedded Messaging</h1>
+  <div>Waiting for bot/agent to join...</div>
 
+  <!-- Overlay shown while input is blocked -->
+  <div id="inputBlockOverlay">Connecting you to a representative...</div>
+
+  <!-- Salesforce bootstrap loader (customize below!) -->
   <script>
     function initEmbeddedMessaging() {
       try {
         embeddedservice_bootstrap.settings.language = 'en_US';
 
         embeddedservice_bootstrap.init(
-          '00DAu000006oc0D', // Org Id
+          '00DAu000006oc0D', // Org ID
           'Sophia_AI', // Embedded Service Deployment Name
-          'https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaAI1736249954377', // URL of the Deployment
+          'https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaAI1736249954377',
           {
-            scrt2URL: 'https://skinvitality--sanbox23.sandbox.my.salesforce-scrt.com' // Optional, but recommended for Messaging
+            scrt2URL: 'https://skinvitality--sanbox23.sandbox.my.salesforce-scrt.com'
           }
         );
       } catch (err) {
@@ -27,5 +50,44 @@
   </script>
 
   <script src="https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaAI1736249954377/assets/js/bootstrap.min.js" onload="initEmbeddedMessaging()" async defer></script>
+
+  <script>
+    // Show or hide input blocker
+    function toggleInputBlock(show) {
+      const overlay = document.getElementById("inputBlockOverlay");
+      if (overlay) overlay.style.display = show ? "flex" : "none";
+    }
+
+    // Disable actual input field (fallback in case it's accessible)
+    function disableInputField(disable) {
+      const interval = setInterval(() => {
+        const input = document.querySelector("textarea");
+        if (input) {
+          input.disabled = disable;
+          input.style.backgroundColor = disable ? "#eee" : "";
+          input.style.cursor = disable ? "not-allowed" : "";
+          input.placeholder = disable ? "Please wait for a representative..." : "Type your message...";
+          clearInterval(interval);
+        }
+      }, 200);
+    }
+
+    // Block input on chat init
+    window.addEventListener("onEmbeddedMessagingReady", function () {
+      toggleInputBlock(true);
+      disableInputField(true);
+    });
+
+    // Listen for bot or agent join
+    window.addEventListener("onEmbeddedMessagingConversationParticipantChanged", function (event) {
+      const participants = event?.detail?.participants || [];
+      const someoneJoined = participants.some(p => p.participantType === "Internal");
+      if (someoneJoined) {
+        console.log("Bot or agent has joined the conversation.");
+        toggleInputBlock(false);
+        disableInputField(false);
+      }
+    });
+  </script>
 </body>
 </html>
