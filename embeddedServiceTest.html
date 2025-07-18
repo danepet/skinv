@@ -329,7 +329,14 @@
         // Listen for messages from iframe (optional - for debugging)
         window.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'EMBEDDED_MESSAGING_INPUT_STATUS') {
-                log(`Received status from iframe: ${event.data.status}`, 'info');
+                log(`Received status from iframe: ${event.data.status}, Input found: ${event.data.inputFound}`, 'info');
+            } else if (event.data && event.data.type === 'EMBEDDED_MESSAGING_IFRAME_READY') {
+                log('Iframe is ready and input field found', 'success');
+                // If we haven't started a conversation yet, we might want to send a block message preemptively
+                if (!conversationStarted) {
+                    log('Preemptively blocking input', 'info');
+                    sendMessageToIframe('BLOCK_INPUT');
+                }
             }
         });
         
@@ -342,62 +349,166 @@
         // Display the iframe code
         const iframeCode = `<script>
 (function() {
+    let isBlocked = false;
+    let checkInterval = null;
+    
+    // Function to find and control the input
+    function controlInput(action) {
+        // Try multiple selectors to find the textarea
+        const selectors = [
+            '.embeddedMessagingInputFooterTextArea',
+            'textarea.embeddedMessagingInputFooterTextArea',
+            'textarea[placeholder*="Type"]',
+            'textarea.slds-textarea'
+        ];
+        
+        let input = null;
+        for (const selector of selectors) {
+            input = document.querySelector(selector);
+            if (input) break;
+        }
+        
+        // Also find send button
+        const sendButton = document.querySelector('button[title="Send"], button[aria-label="Send"]');
+        
+        if (action === 'BLOCK_INPUT') {
+            isBlocked = true;
+            if (input) {
+                input.disabled = true;
+                input.setAttribute('aria-disabled', 'true');
+                input.placeholder = 'Waiting for agent to join...';
+                input.style.cursor = 'not-allowed';
+                input.style.backgroundColor = '#f0f0f0';
+                input.style.opacity = '0.6';
+                
+                // Prevent typing by adding event listener
+                input.addEventListener('keydown', preventTyping, true);
+                input.addEventListener('paste', preventTyping, true);
+            }
+            if (sendButton) {
+                sendButton.disabled = true;
+                sendButton.style.cursor = 'not-allowed';
+                sendButton.style.opacity = '0.6';
+            }
+            
+            // Send confirmation back to parent
+            parent.postMessage({
+                type: 'EMBEDDED_MESSAGING_INPUT_STATUS',
+                status: 'blocked',
+                inputFound: !!input
+            }, '*');
+            
+        } else if (action === 'ENABLE_INPUT') {
+            isBlocked = false;
+            if (input) {
+                input.disabled = false;
+                input.setAttribute('aria-disabled', 'false');
+                input.placeholder = 'Type your message...';
+                input.style.cursor = 'text';
+                input.style.backgroundColor = '';
+                input.style.opacity = '1';
+                
+                // Remove event listeners
+                input.removeEventListener('keydown', preventTyping, true);
+                input.removeEventListener('paste', preventTyping, true);
+            }
+            if (sendButton) {
+                sendButton.disabled = false;
+                sendButton.style.cursor = 'pointer';
+                sendButton.style.opacity = '1';
+            }
+            
+            // Send confirmation back to parent
+            parent.postMessage({
+                type: 'EMBEDDED_MESSAGING_INPUT_STATUS',
+                status: 'enabled',
+                inputFound: !!input
+            }, '*');
+        }
+        
+        return !!input;
+    }
+    
+    // Function to prevent typing
+    function preventTyping(e) {
+        if (isBlocked) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }
+    }
+    
+    // Function to continuously enforce blocking
+    function enforceBlocking() {
+        if (isBlocked) {
+            controlInput('BLOCK_INPUT');
+        }
+    }
+    
     // Listen for messages from parent window
     window.addEventListener('message', function(event) {
         // In production, verify event.origin
         if (event.data && event.data.type === 'EMBEDDED_MESSAGING_INPUT_CONTROL') {
             console.log('[Iframe] Received message:', event.data);
             
-            const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
-            const sendButton = document.querySelector('button[title="Send"], button[aria-label="Send"]');
+            const success = controlInput(event.data.action);
             
+            // If we couldn't find the input, try again in a bit
+            if (!success && event.data.action === 'BLOCK_INPUT') {
+                setTimeout(() => controlInput(event.data.action), 500);
+            }
+            
+            // Start or stop enforcement based on action
             if (event.data.action === 'BLOCK_INPUT') {
-                if (input) {
-                    input.disabled = true;
-                    input.placeholder = 'Waiting for agent to join...';
-                    input.style.cursor = 'not-allowed';
-                    input.style.backgroundColor = '#f0f0f0';
-                }
-                if (sendButton) {
-                    sendButton.disabled = true;
-                    sendButton.style.cursor = 'not-allowed';
-                }
-                
-                // Send confirmation back to parent
-                parent.postMessage({
-                    type: 'EMBEDDED_MESSAGING_INPUT_STATUS',
-                    status: 'blocked'
-                }, '*');
-                
+                // Check every 500ms to re-enforce blocking
+                if (checkInterval) clearInterval(checkInterval);
+                checkInterval = setInterval(enforceBlocking, 500);
             } else if (event.data.action === 'ENABLE_INPUT') {
-                if (input) {
-                    input.disabled = false;
-                    input.placeholder = 'Type a message...';
-                    input.style.cursor = 'text';
-                    input.style.backgroundColor = '';
+                // Stop enforcement
+                if (checkInterval) {
+                    clearInterval(checkInterval);
+                    checkInterval = null;
                 }
-                if (sendButton) {
-                    sendButton.disabled = false;
-                    sendButton.style.cursor = 'pointer';
-                }
-                
-                // Send confirmation back to parent
-                parent.postMessage({
-                    type: 'EMBEDDED_MESSAGING_INPUT_STATUS',
-                    status: 'enabled'
-                }, '*');
             }
         }
     });
     
-    // Check for input field periodically when page loads
-    let checkInterval = setInterval(function() {
+    // Initial check for input field and log when ready
+    let readyInterval = setInterval(function() {
         const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
         if (input) {
             console.log('[Iframe] Input field found, ready to receive commands');
-            clearInterval(checkInterval);
+            clearInterval(readyInterval);
+            
+            // Notify parent that iframe is ready
+            parent.postMessage({
+                type: 'EMBEDDED_MESSAGING_IFRAME_READY',
+                inputFound: true
+            }, '*');
         }
     }, 100);
+    
+    // Also observe DOM changes to catch dynamically added inputs
+    const observer = new MutationObserver(function(mutations) {
+        if (isBlocked) {
+            controlInput('BLOCK_INPUT');
+        }
+    });
+    
+    // Start observing when document is ready
+    if (document.body) {
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    } else {
+        document.addEventListener('DOMContentLoaded', function() {
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        });
+    }
 })();
 <\/script>`;
         
