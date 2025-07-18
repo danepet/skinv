@@ -351,25 +351,69 @@
 (function() {
     let isBlocked = false;
     let checkInterval = null;
+    let preventTypingHandler = null;
     
-    // Function to find and control the input
-    function controlInput(action) {
-        // Try multiple selectors to find the textarea
-        const selectors = [
-            '.embeddedMessagingInputFooterTextArea',
-            'textarea.embeddedMessagingInputFooterTextArea',
-            'textarea[placeholder*="Type"]',
-            'textarea.slds-textarea'
-        ];
+    // Function to traverse shadow DOM and find elements
+    function findInShadowDOM(selector, root = document) {
+        // First check in the regular DOM
+        let element = root.querySelector(selector);
+        if (element) return element;
         
-        let input = null;
-        for (const selector of selectors) {
-            input = document.querySelector(selector);
-            if (input) break;
+        // Then check all shadow roots
+        const allElements = root.querySelectorAll('*');
+        for (let el of allElements) {
+            if (el.shadowRoot) {
+                element = findInShadowDOM(selector, el.shadowRoot);
+                if (element) return element;
+            }
+        }
+        return null;
+    }
+    
+    // Function to find the input through shadow DOM
+    function findInputElement() {
+        // Navigate through the shadow DOM structure
+        // Based on your HTML: embeddedmessaging-container -> embeddedmessaging-conversation-state -> embeddedmessaging-input-footer
+        
+        let container = document.querySelector('embeddedmessaging-container');
+        if (!container) return null;
+        
+        // Try direct shadow root access
+        if (container.shadowRoot) {
+            let conversationState = container.shadowRoot.querySelector('embeddedmessaging-conversation-state');
+            if (conversationState && conversationState.shadowRoot) {
+                let inputFooter = conversationState.shadowRoot.querySelector('embeddedmessaging-input-footer');
+                if (inputFooter && inputFooter.shadowRoot) {
+                    return inputFooter.shadowRoot.querySelector('.embeddedMessagingInputFooterTextArea');
+                }
+            }
         }
         
-        // Also find send button
-        const sendButton = document.querySelector('button[title="Send"], button[aria-label="Send"]');
+        // If direct access doesn't work, try finding the input footer component
+        let inputFooter = document.querySelector('embeddedmessaging-input-footer');
+        if (inputFooter && inputFooter.shadowRoot) {
+            return inputFooter.shadowRoot.querySelector('.embeddedMessagingInputFooterTextArea');
+        }
+        
+        // Fallback to deep shadow DOM search
+        return findInShadowDOM('.embeddedMessagingInputFooterTextArea');
+    }
+    
+    // Function to find send button through shadow DOM
+    function findSendButton() {
+        let inputFooter = document.querySelector('embeddedmessaging-input-footer');
+        if (inputFooter && inputFooter.shadowRoot) {
+            return inputFooter.shadowRoot.querySelector('button[title="Send"], button[aria-label="Send"]');
+        }
+        return findInShadowDOM('button[title="Send"], button[aria-label="Send"]');
+    }
+    
+    // Function to control input
+    function controlInput(action) {
+        const input = findInputElement();
+        const sendButton = findSendButton();
+        
+        console.log('[Iframe] Control input:', action, 'Input found:', !!input, 'Button found:', !!sendButton);
         
         if (action === 'BLOCK_INPUT') {
             isBlocked = true;
@@ -381,9 +425,22 @@
                 input.style.backgroundColor = '#f0f0f0';
                 input.style.opacity = '0.6';
                 
-                // Prevent typing by adding event listener
-                input.addEventListener('keydown', preventTyping, true);
-                input.addEventListener('paste', preventTyping, true);
+                // Create and store the prevent typing handler
+                preventTypingHandler = function(e) {
+                    if (isBlocked) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        return false;
+                    }
+                };
+                
+                // Add event listeners
+                input.addEventListener('keydown', preventTypingHandler, true);
+                input.addEventListener('keypress', preventTypingHandler, true);
+                input.addEventListener('input', preventTypingHandler, true);
+                input.addEventListener('paste', preventTypingHandler, true);
+                input.addEventListener('beforeinput', preventTypingHandler, true);
             }
             if (sendButton) {
                 sendButton.disabled = true;
@@ -395,7 +452,8 @@
             parent.postMessage({
                 type: 'EMBEDDED_MESSAGING_INPUT_STATUS',
                 status: 'blocked',
-                inputFound: !!input
+                inputFound: !!input,
+                buttonFound: !!sendButton
             }, '*');
             
         } else if (action === 'ENABLE_INPUT') {
@@ -409,8 +467,13 @@
                 input.style.opacity = '1';
                 
                 // Remove event listeners
-                input.removeEventListener('keydown', preventTyping, true);
-                input.removeEventListener('paste', preventTyping, true);
+                if (preventTypingHandler) {
+                    input.removeEventListener('keydown', preventTypingHandler, true);
+                    input.removeEventListener('keypress', preventTypingHandler, true);
+                    input.removeEventListener('input', preventTypingHandler, true);
+                    input.removeEventListener('paste', preventTypingHandler, true);
+                    input.removeEventListener('beforeinput', preventTypingHandler, true);
+                }
             }
             if (sendButton) {
                 sendButton.disabled = false;
@@ -422,20 +485,12 @@
             parent.postMessage({
                 type: 'EMBEDDED_MESSAGING_INPUT_STATUS',
                 status: 'enabled',
-                inputFound: !!input
+                inputFound: !!input,
+                buttonFound: !!sendButton
             }, '*');
         }
         
         return !!input;
-    }
-    
-    // Function to prevent typing
-    function preventTyping(e) {
-        if (isBlocked) {
-            e.preventDefault();
-            e.stopPropagation();
-            return false;
-        }
     }
     
     // Function to continuously enforce blocking
@@ -455,6 +510,7 @@
             
             // If we couldn't find the input, try again in a bit
             if (!success && event.data.action === 'BLOCK_INPUT') {
+                console.log('[Iframe] Input not found, retrying in 500ms');
                 setTimeout(() => controlInput(event.data.action), 500);
             }
             
@@ -475,9 +531,9 @@
     
     // Initial check for input field and log when ready
     let readyInterval = setInterval(function() {
-        const input = document.querySelector('.embeddedMessagingInputFooterTextArea');
+        const input = findInputElement();
         if (input) {
-            console.log('[Iframe] Input field found, ready to receive commands');
+            console.log('[Iframe] Input field found in shadow DOM, ready to receive commands');
             clearInterval(readyInterval);
             
             // Notify parent that iframe is ready
@@ -488,26 +544,32 @@
         }
     }, 100);
     
-    // Also observe DOM changes to catch dynamically added inputs
-    const observer = new MutationObserver(function(mutations) {
-        if (isBlocked) {
-            controlInput('BLOCK_INPUT');
+    // Observe shadow host elements for changes
+    function observeShadowHosts() {
+        const observer = new MutationObserver(function(mutations) {
+            if (isBlocked) {
+                controlInput('BLOCK_INPUT');
+            }
+        });
+        
+        // Observe the main container
+        const container = document.querySelector('embeddedmessaging-container');
+        if (container) {
+            observer.observe(container, { childList: true, subtree: true });
         }
-    });
+        
+        // Also observe the input footer if available
+        const inputFooter = document.querySelector('embeddedmessaging-input-footer');
+        if (inputFooter) {
+            observer.observe(inputFooter, { childList: true, subtree: true });
+        }
+    }
     
     // Start observing when document is ready
-    if (document.body) {
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', observeShadowHosts);
     } else {
-        document.addEventListener('DOMContentLoaded', function() {
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-        });
+        observeShadowHosts();
     }
 })();
 <\/script>`;
