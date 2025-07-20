@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embedded Messaging</title>
+</head>
+<body>
+    <h1>Welcome to our Support Page</h1>
+    <p>Click the chat icon in the bottom right to start a conversation.</p>
+
+    <script type='text/javascript'>
+
+
+        /**
+         * Initializes the Embedded Messaging service.
+         */
+        function initEmbeddedMessaging() {
+            try {
+                embeddedservice_bootstrap.settings.language = 'en_US';
+                embeddedservice_bootstrap.settings.enableUserInputForConversationWithBot = false;
+                embeddedservice_bootstrap.init(
+          				'00DAu000006oc0D',
+          				'Sophia_Salesforce_Support',
+          				'https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaSalesforceSupp1753027905972',
+          				{
+          					scrt2URL: 'https://skinvitality--sanbox23.sandbox.my.salesforce-scrt.com'
+          				}
+          			);
+            } catch (err) {
+                console.error('Error loading Embedded Messaging: ', err);
+            }
+        }
+        
+    </script>
+
+    <script type='text/javascript' 
+            src='https://skinvitality--sanbox23.sandbox.my.site.com/ESWSophiaAI1736249954377/assets/js/bootstrap.min.js' 
+            onload='initEmbeddedMessaging()'>
+    </script>
+</body>
+</html>
