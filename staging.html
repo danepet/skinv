@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embedded Messaging</title>
+</head>
+<body>
+    <h1>Staging Embedded Service Deploymentt</h1>
+    <p>Click the chat icon in the bottom right to start a conversation.</p>
+
+   <script type='text/javascript'>
+	function initEmbeddedMessaging() {
+		try {
+			embeddedservice_bootstrap.settings.language = 'en_US'; // For example, enter 'en' or 'en-US'
+
+			embeddedservice_bootstrap.init(
+				'00DSv000005jl7y',
+				'Sophia_AI',
+				'https://skinvitality--svptl.sandbox.my.site.com/ESWSophiaAI1736249954377',
+				{
+					scrt2URL: 'https://skinvitality--svptl.sandbox.my.salesforce-scrt.com'
+				}
+			);
+		} catch (err) {
+			console.error('Error loading Embedded Messaging: ', err);
+		}
+	};
+</script>
+<script type='text/javascript' src='https://skinvitality--svptl.sandbox.my.site.com/ESWSophiaAI1736249954377/assets/js/bootstrap.min.js' onload='initEmbeddedMessaging()'></script>
+</body>
+</html>
